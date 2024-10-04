@@ -1,43 +1,6 @@
-# Start with the base image
-FROM ubuntu:latest
-
-# Set environment variables for Nexus credentials
-# It's recommended to pass these as build arguments or environment variables for security
-ARG NEXUS_USERNAME
-ARG NEXUS_PASSWORD
-ARG NEXUS_REPO_URL=nexus.yourdomain.com
-
-# Install required dependencies to use apt and tools
-RUN apt-get update && apt-get install -y \
-    gnupg2 \
-    apt-transport-https \
-    ca-certificates \
-    curl && \
-    rm -rf /var/lib/apt/lists/*
-
-# Create apt_auth.conf for Nexus authentication
-RUN echo "machine $NEXUS_REPO_URL\nlogin $NEXUS_USERNAME\npassword $NEXUS_PASSWORD" > /etc/apt/apt_auth.conf && \
-    chmod 600 /etc/apt/apt_auth.conf
-
-# Configure apt.conf to use apt_auth.conf for Nexus repository authentication
-RUN echo 'Acquire::http::auth { \n\
-    "http://$NEXUS_REPO_URL/repository/apt-repo/" { \n\
-        Auth::method "basic"; \n\
-        Auth::credentials ("/etc/apt/apt_auth.conf"); \n\
-    }; \n\
-};' > /etc/apt/apt.conf
-
-# Add your Nexus repository to sources.list (without authentication in the URL)
-RUN echo "deb http://$NEXUS_REPO_URL/repository/apt-repo/ focal main" > /etc/apt/sources.list
-
-# Update the package lists and install your packages
-RUN apt-get update && \
-    apt-get install -y <your-packages-here> && \
-    rm -rf /var/lib/apt/lists/*
-
-# Set up the working directory and copy your application files if needed
-WORKDIR /app
-COPY . /app
-
-# Define the entry point or CMD for your Docker container
-CMD ["/bin/bash"]
+Acquire::http::auth {
+    "http://nexus.yourdomain.com/repository/apt-repo/" {
+        Auth::method "basic";
+        Auth::credentials ("/etc/apt/apt_auth.conf");
+    };
+};
