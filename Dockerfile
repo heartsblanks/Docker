@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
 # Set the working directory
 WORKDIR /usr/src/git_repo
 
+# Install Flask (if running Flask inside Docker)
+RUN pip install flask
+
 # Expose port for Flask API
 EXPOSE 5000
 
