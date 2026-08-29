@@ -1,0 +1,180 @@
+networks:
+  ace-dev-net:
+    name: ace-dev-net
+
+volumes:
+  mq_data:
+  db2_orders_data:
+  db2_customer_data:
+  db2_mainframe_data:
+  oracle_data:
+  ace_workdir:
+
+services:
+
+  # ---------------------------------------------------------------------
+  # IBM MQ 9.5 — the queue manager used by developer message flows
+  # ---------------------------------------------------------------------
+  mq:
+    image: ${MQ_IMAGE}:${MQ_TAG}
+    container_name: dev-mq
+    hostname: mq
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: ${MQ_QMGR_NAME}
+      MQ_APP_PASSWORD: ${MQ_APP_PASSWORD}
+      MQ_ADMIN_PASSWORD: ${MQ_ADMIN_PASSWORD}
+    ports:
+      - "1414:1414"   # MQ listener
+      - "9443:9443"   # MQ web console (https)
+    volumes:
+      - mq_data:/mnt/mqm
+    networks:
+      - ace-dev-net
+    healthcheck:
+      test: ["CMD", "chkmqready"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Db2 #1 — a normal application database ("orders")
+  # ---------------------------------------------------------------------
+  db2-orders:
+    image: ${DB2_IMAGE}:${DB2_TAG}
+    container_name: dev-db2-orders
+    hostname: db2-orders
+    privileged: true
+    environment:
+      LICENSE: accept
+      DB2INST1_PASSWORD: ${DB2_ORDERS_PASSWORD}
+      DBNAME: ${DB2_ORDERS_DBNAME}
+    ports:
+      - "${DB2_ORDERS_PORT}:50000"
+    volumes:
+      - db2_orders_data:/database
+    networks:
+      - ace-dev-net
+    healthcheck:
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to $${DBNAME}' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Db2 #2 — a second application database ("customer")
+  # ---------------------------------------------------------------------
+  db2-customer:
+    image: ${DB2_IMAGE}:${DB2_TAG}
+    container_name: dev-db2-customer
+    hostname: db2-customer
+    privileged: true
+    environment:
+      LICENSE: accept
+      DB2INST1_PASSWORD: ${DB2_CUSTOMER_PASSWORD}
+      DBNAME: ${DB2_CUSTOMER_DBNAME}
+    ports:
+      - "${DB2_CUSTOMER_PORT}:50000"
+    volumes:
+      - db2_customer_data:/database
+    networks:
+      - ace-dev-net
+    healthcheck:
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to $${DBNAME}' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Db2 "mainframe" stand-in — represents the Db2 for z/OS subsystem.
+  # Db2 for z/OS itself cannot run in a container; this is a plain Db2 LUW
+  # container that flows can be pointed at locally to exercise the same
+  # connection/JDBC logic they'd use against the real mainframe Db2.
+  # ---------------------------------------------------------------------
+  db2-mainframe:
+    image: ${DB2_IMAGE}:${DB2_TAG}
+    container_name: dev-db2-mainframe
+    hostname: db2-mainframe
+    privileged: true
+    environment:
+      LICENSE: accept
+      DB2INST1_PASSWORD: ${DB2_MAINFRAME_PASSWORD}
+      DBNAME: ${DB2_MAINFRAME_DBNAME}
+    ports:
+      - "${DB2_MAINFRAME_PORT}:50000"
+    volumes:
+      - db2_mainframe_data:/database
+    networks:
+      - ace-dev-net
+    healthcheck:
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to $${DBNAME}' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Oracle database
+  # ---------------------------------------------------------------------
+  oracle:
+    image: ${ORACLE_IMAGE}:${ORACLE_TAG}
+    container_name: dev-oracle
+    hostname: oracle
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      APP_USER: ${ORACLE_APP_USER}
+      APP_USER_PASSWORD: ${ORACLE_APP_PASSWORD}
+    ports:
+      - "1521:1521"
+      - "5500:5500"   # EM Express
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    networks:
+      - ace-dev-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # IBM App Connect Enterprise — single integration node/server
+  # Connects out to mq, db2-orders, db2-customer, db2-mainframe, oracle.
+  # This stack only starts the runtime; message flows are deployed by the
+  # developer via the ACE web UI / toolkit / ibm-ace VS Code extension
+  # against the exposed admin ports below.
+  # ---------------------------------------------------------------------
+  ace:
+    image: ${ACE_IMAGE}:${ACE_TAG}
+    container_name: dev-ace
+    hostname: ace
+    environment:
+      LICENSE: accept
+      ACE_SERVER_NAME: ${ACE_SERVER_NAME}
+    ports:
+      - "7600:7600"   # internal admin
+      - "7800:7800"   # integration server HTTP
+      - "7843:7843"   # web UI / admin REST (https)
+    volumes:
+      - ace_workdir:/home/aceuser/ace-server
+      - ./ace-config/jdbc-drivers:/home/aceuser/ace-server/jdbc-drivers:ro
+      - ./ace-config/policyxml:/home/aceuser/ace-server/overrides/policyxml:ro
+      - ./ace-config/keystore:/home/aceuser/ace-server/keystore:ro
+    depends_on:
+      - mq
+      - db2-orders
+      - db2-customer
+      - db2-mainframe
+      - oracle
+    networks:
+      - ace-dev-net
+    restart: unless-stopped

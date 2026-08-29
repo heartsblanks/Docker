@@ -1,0 +1,2 @@
+.env
+ace-config/jdbc-drivers/*.jar
